@@ -1,12 +1,16 @@
-//
-//  AppDelegate.swift
-//  ShowOnBadge
-//
-//  Created by Anders Hovmöller on 2018-10-17.
-//  Copyright © 2018 Anders Hovmöller. All rights reserved.
-//
-
 import Cocoa
+
+let CoreServiceBundle = CFBundleGetBundleWithIdentifier("com.apple.CoreServices" as CFString)
+
+let GetRunningApplicationArray: () -> [CFTypeRef] = {
+    let functionPtr = CFBundleGetFunctionPointerForName(CoreServiceBundle, "_LSCopyRunningApplicationArray" as CFString)
+    return unsafeBitCast(functionPtr, to:(@convention(c)(UInt)->[CFTypeRef]).self)(0xfffffffe)
+}
+
+let GetApplicationInformation: (CFTypeRef) -> [String:CFTypeRef] = { app in
+    let functionPtr = CFBundleGetFunctionPointerForName(CoreServiceBundle, "_LSCopyApplicationInformation" as CFString)
+    return unsafeBitCast(functionPtr, to: (@convention(c)(UInt, Any, Any)->[String:CFTypeRef]).self)(0xffffffff, app, 0)
+}
 
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -19,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var menu: NSMenu = NSMenu()
     var menuOpen = false
     var hasShownPreferences = false
+    var appStartTime = Date()
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         statusBarItem.button?.title = "⊚"
@@ -28,7 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.menu.addItem(NSMenuItem.init(title: "Preferences", action: #selector(self.preferences), keyEquivalent: ""))
         self.menu.addItem(NSMenuItem.init(title: "Quit", action: #selector(self.quit), keyEquivalent: ""))
 
-        UserDefaults.standard.register(defaults: ["refresh_seconds": 2.0])
+        UserDefaults.standard.register(defaults: ["refresh_seconds": 10.0])
 
         var refresh_seconds = UserDefaults.standard.float(forKey: "refresh_seconds")
         if refresh_seconds <= 0 {
@@ -64,18 +69,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     
     @objc
     func update() {
-        let CoreServiceBundle = CFBundleGetBundleWithIdentifier("com.apple.CoreServices" as CFString)
-
-        let GetRunningApplicationArray: () -> [CFTypeRef] = {
-            let functionPtr = CFBundleGetFunctionPointerForName(CoreServiceBundle, "_LSCopyRunningApplicationArray" as CFString)
-            return unsafeBitCast(functionPtr,to:(@convention(c)(UInt)->[CFTypeRef]).self)(0xfffffffe)
+        if (Date().timeIntervalSince(appStartTime) > 60 * 5) {
+            // The app badges API call leaks memory quite badly, so restart the app programmatically every 5 minutes
+            let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
+            let path = url.deletingLastPathComponent().deletingLastPathComponent().absoluteString
+            let task = Process()
+            task.launchPath = "/usr/bin/open"
+            task.arguments = [path]
+            task.launch()
+            exit(0)
         }
-
-        let GetApplicationInformation: (CFTypeRef) -> [String:CFTypeRef] = { app in
-            let functionPtr = CFBundleGetFunctionPointerForName(CoreServiceBundle, "_LSCopyApplicationInformation" as CFString)
-            return unsafeBitCast(functionPtr, to: (@convention(c)(UInt, Any, Any)->[String:CFTypeRef]).self)(0xffffffff, app, 0)
-        }
-
+        
         let badgeLabelKey = "StatusLabel"
 
         let apps = GetRunningApplicationArray()
